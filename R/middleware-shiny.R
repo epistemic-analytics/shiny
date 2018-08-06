@@ -41,3 +41,42 @@ sessionHandler <- function(req) {
     shinysession$handleRequest(subreq)
   })
 }
+
+parseCookies <- function(cookie){
+  if (is.null(cookie) || nchar(cookie) == 0){
+    return(list())
+  }
+  cookie <- strsplit(cookie, ";", fixed=TRUE)[[1]]
+  cookie <- sub("\\s*([\\S*])\\s*", "\\1", cookie, perl=TRUE)
+
+  cookieList <- strsplit(cookie, "=", fixed=TRUE)
+
+  # Handle any non-existent cookie values.
+  for (i in 1:length(cookieList)){
+    if(length(cookieList[[i]])==1){
+      cookieList[[i]][[2]] <- ""
+    }
+  }
+
+  cookies <- lapply(cookieList, "[[", 2)
+  names(cookies) <- sapply(cookieList, "[[", 1)
+
+  return(lapply(cookies, URLdecode))
+}
+
+setCookie <- function(req, headers) {
+  cookies = parseCookies(req$HTTP_COOKIE)
+  sessionID = options("shiny.sessionID")$shiny.sessionID
+  if(!is.null(sessionID) && is.null(cookies[[sessionID]]))  {
+    cookie = c(sessionID, "=",  uuid::UUIDgenerate(), "; HttpOnly")
+
+    cookieExpires = options("shiny.cookieExpires")$shiny.cookieExpires
+    if(!is.null(cookieExpires)) {
+      cookie = c(cookie, "; Max-Age=", cookieExpires)
+    }
+
+    cookieString = paste(cookie, collapse="")
+    headers["Set-Cookie"] = cookieString
+  }
+  return(headers)
+}

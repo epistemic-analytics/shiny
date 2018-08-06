@@ -333,6 +333,7 @@ HandlerManager <- R6Class("HandlerManager",
       if (is.null(filter))
         filter <- function(req, response) response
 
+      print("Starting EA Shiny Server")
       function(req) {
         if (!is.null(sharedSecret)
           && !identical(sharedSecret, req$HTTP_SHINY_SHARED_SECRET)) {
@@ -361,6 +362,7 @@ HandlerManager <- R6Class("HandlerManager",
             headers$'Content-Type' <- response$content_type
 
             response <- filter(req, response)
+            headers = setCookie(req, headers)
             if (head_request) {
 
               headers$`Content-Length` <- getResponseContentLength(response, deleteOwnedContent = TRUE)
