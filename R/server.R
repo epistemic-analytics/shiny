@@ -22,6 +22,7 @@ registerClient <- function(client) {
 }
 
 
+.globals$resourcePaths <- list()
 .globals$resources <- list()
 
 .globals$showcaseDefault <- 0
@@ -40,11 +41,6 @@ registerClient <- function(client) {
 #'   '/foo' will be mapped to the given directory.
 #' @param directoryPath The directory that contains the static resources to be
 #'   served.
-#'
-#' @details You can call \code{addResourcePath} multiple times for a given
-#'   \code{prefix}; only the most recent value will be retained. If the
-#'   normalized \code{directoryPath} is different than the directory that's
-#'   currently mapped to the \code{prefix}, a warning will be issued.
 #'
 #' @seealso \code{\link{singleton}}
 #'
@@ -66,30 +62,65 @@ addResourcePath <- function(prefix, directoryPath) {
         "`prefix` = '", prefix, "'; `directoryPath` = '" , directoryPath, "'")
     }
   )
+
+  # If a shiny app is currently running, dynamically register this path with
+  # the corresponding httpuv server object.
+  if (!is.null(getShinyOption("server")))
+  {
+    getShinyOption("server")$setStaticPath(.list = stats::setNames(normalizedPath, prefix))
+  }
+
+  # .globals$resourcePaths and .globals$resources persist across runs of applications.
+  .globals$resourcePaths[[prefix]] <- staticPath(normalizedPath)
+  # This is necessary because resourcePaths is only for serving assets out of C++;
+  # to support subapps, we also need assets to be served out of R, because those
+  # URLs are rewritten by R code (i.e. routeHandler) before they can be matched to
+  # a resource path.
   .globals$resources[[prefix]] <- list(
     directoryPath = normalizedPath,
     func = staticHandler(normalizedPath)
   )
 }
 
+# This function handles any GET request with two or more path elements where the
+# first path element matches a prefix that was previously added using
+# addResourcePath().
+#
+# For example, if `addResourcePath("foo", "~/bar")` was called, then a GET
+# request for /foo/one/two.html would rewrite the PATH_INFO as /one/two.html and
+# send it to the resource path function for "foo". As of this writing, that
+# function will always be a staticHandler, which serves up a file if it exists
+# and NULL if it does not.
+#
+# Since Shiny 1.3.x, assets registered via addResourcePath should mostly be
+# served out of httpuv's native static file serving features. However, in the
+# specific case of subapps, the R code path must be used, because subapps insert
+# a giant random ID into the beginning of the URL that must be stripped off by
+# an R route handler (see addSubApp()).
 resourcePathHandler <- function(req) {
   if (!identical(req$REQUEST_METHOD, 'GET'))
     return(NULL)
 
+  # e.g. "/foo/one/two.html"
   path <- req$PATH_INFO
 
   match <- regexpr('^/([^/]+)/', path, perl=TRUE)
   if (match == -1)
     return(NULL)
   len <- attr(match, 'capture.length')
+  # e.g. "foo"
   prefix <- substr(path, 2, 2 + len - 1)
 
   resInfo <- .globals$resources[[prefix]]
   if (is.null(resInfo))
     return(NULL)
 
+  # e.g. "/one/two.html"
   suffix <- substr(path, 2 + len, nchar(path))
 
+  # Create a new request that's a clone of the current request, but adjust
+  # PATH_INFO and SCRIPT_NAME to reflect that we have already matched the first
+  # path element (e.g. "/foo"). See routeHandler() for more info.
   subreq <- as.environment(as.list(req, all.names=TRUE))
   subreq$PATH_INFO <- suffix
   subreq$SCRIPT_NAME <- paste(subreq$SCRIPT_NAME, substr(path, 1, 2 + len), sep='')
@@ -187,7 +218,7 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
   # This value, if non-NULL, must be present on all HTTP and WebSocket
   # requests as the Shiny-Shared-Secret header or else access will be
   # denied (403 response for HTTP, and instant close for websocket).
-  sharedSecret <- getOption('shiny.sharedSecret')
+  checkSharedSecret <- loadSharedSecret()
 
   appHandlers <- list(
     http = joinHandlers(c(
@@ -195,10 +226,10 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
       httpHandlers,
       sys.www.root,
       resourcePathHandler,
-      reactLogHandler)),
+      reactLogHandler
+    )),
     ws = function(ws) {
-      if (!is.null(sharedSecret)
-          && !identical(sharedSecret, ws$request$HTTP_SHINY_SHARED_SECRET)) {
+      if (!checkSharedSecret(ws$request$HTTP_SHINY_SHARED_SECRET)) {
         ws$close()
         return(TRUE)
       }
@@ -417,6 +448,27 @@ startApp <- function(appObj, port, host, quiet) {
   handlerManager$addHandler(appHandlers$http, "/", tail = TRUE)
   handlerManager$addWSHandler(appHandlers$ws, "/", tail = TRUE)
 
+  httpuvApp <- handlerManager$createHttpuvApp()
+  httpuvApp$staticPaths <- c(
+    appObj$staticPaths,
+    list(
+      # Always handle /session URLs dynamically, even if / is a static path.
+      "session" = excludeStaticPath(),
+      "shared" = system.file(package = "shiny", "www", "shared")
+    ),
+    .globals$resourcePaths
+  )
+  httpuvApp$staticPathOptions <- httpuv::staticPathOptions(
+    html_charset = "utf-8",
+    headers = list("X-UA-Compatible" = "IE=edge,chrome=1"),
+    validation =
+      if (!is.null(getOption("shiny.sharedSecret"))) {
+        sprintf('"Shiny-Shared-Secret" == "%s"', getOption("shiny.sharedSecret"))
+      } else {
+        character(0)
+      }
+  )
+
   if (is.numeric(port) || is.integer(port)) {
     if (!quiet) {
       hostString <- host
@@ -424,7 +476,7 @@ startApp <- function(appObj, port, host, quiet) {
         hostString <- paste0("[", hostString, "]")
       message('\n', 'Listening on http://', hostString, ':', port)
     }
-    return(startServer(host, port, handlerManager$createHttpuvApp()))
+    return(startServer(host, port, httpuvApp))
   } else if (is.character(port)) {
     if (!quiet) {
       message('\n', 'Listening on domain socket ', port)
@@ -436,7 +488,7 @@ startApp <- function(appObj, port, host, quiet) {
            "configuration (and not domain sockets), then `port` must ",
            "be numeric, not a string.")
     }
-    return(startPipeServer(port, mask, handlerManager$createHttpuvApp()))
+    return(startPipeServer(port, mask, httpuvApp))
   }
 }
 
@@ -579,11 +631,15 @@ runApp <- function(appDir=getwd(),
     .globals$running <- FALSE
   }, add = TRUE)
 
-  # Enable per-app Shiny options
+  # Enable per-app Shiny options, for shinyOptions() and getShinyOption().
   oldOptionSet <- .globals$options
   on.exit({
     .globals$options <- oldOptionSet
   },add = TRUE)
+
+  # A unique identifier associated with this run of this application. It is
+  # shared across sessions.
+  shinyOptions(appToken = createUniqueId(8))
 
   # Make warnings print immediately
   # Set pool.scheduler to support pool package
@@ -593,6 +649,11 @@ runApp <- function(appDir=getwd(),
     pool.scheduler = scheduleTask
   )
   on.exit(options(ops), add = TRUE)
+
+  # Set up default cache for app.
+  if (is.null(getShinyOption("cache"))) {
+    shinyOptions(cache = MemoryCache$new())
+  }
 
   appParts <- as.shiny.appobj(appDir)
 
@@ -767,6 +828,10 @@ runApp <- function(appDir=getwd(),
     appParts$onStart()
 
   server <- startApp(appParts, port, host, quiet)
+
+  # Make the httpuv server object accessible. Needed for calling
+  # addResourcePath while app is running.
+  shinyOptions(server = server)
 
   on.exit({
     stopServer(server)

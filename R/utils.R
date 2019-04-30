@@ -121,8 +121,8 @@ isWholeNum <- function(x, tol = .Machine$double.eps^0.5) {
 }
 
 `%AND%` <- function(x, y) {
-  if (!is.null(x) && !is.na(x))
-    if (!is.null(y) && !is.na(y))
+  if (!is.null(x) && !isTRUE(is.na(x)))
+    if (!is.null(y) && !isTRUE(is.na(y)))
       return(y)
   return(NULL)
 }
@@ -267,6 +267,25 @@ find.file.ci <- function(...) {
 # compatibility we need to add this function
 dirExists <- function(paths) {
   file.exists(paths) & file.info(paths)$isdir
+}
+
+# Removes empty directory (vectorized). This is needed because file.remove()
+# on Unix will remove empty directories, but on Windows, it will not. On
+# Windows, you would need to use unlink(recursive=TRUE), which is not very
+# safe. This function does it safely on Unix and Windows.
+dirRemove <- function(path) {
+  for (p in path) {
+    if (!dirExists(p)) {
+      stop("Cannot remove non-existent directory ", p, ".")
+    }
+    if (length(dir(p, all.files = TRUE, no.. = TRUE)) != 0) {
+      stop("Cannot remove non-empty directory ", p, ".")
+    }
+    result <- unlink(p, recursive = TRUE)
+    if (result == 1) {
+      stop("Error removing directory ", p, ".")
+    }
+  }
 }
 
 # Attempt to join a path and relative path, and turn the result into a
@@ -1031,7 +1050,7 @@ safeError <- function(error) {
 # #' @examples
 # #' ## Note: the breaking of the reactive chain that happens in the app
 # #' ## below (when input$txt = 'bad' and input$allowBad = 'FALSE') is
-# #' ## easily visualized with `showReactLog()`
+# #' ## easily visualized with `reactlogShow()`
 # #'
 # #' ## Only run examples in interactive R sessions
 # #' if (interactive()) {
@@ -1720,4 +1739,43 @@ getSliderType <- function(min, max, value) {
     stop("Type mismatch for `min`, `max`, and `value`. Each must be Date, POSIXt, or number.")
   }
   type[[1]]
+}
+
+# Reads the `shiny.sharedSecret` global option, and returns a function that can
+# be used to test header values for a match.
+loadSharedSecret <- function() {
+  normalizeToRaw <- function(value, label = "value") {
+    if (is.null(value)) {
+      raw()
+    } else if (is.character(value)) {
+      charToRaw(paste(value, collapse = "\n"))
+    } else if (is.raw(value)) {
+      value
+    } else {
+      stop("Wrong type for ", label, "; character or raw expected")
+    }
+  }
+
+  sharedSecret <- normalizeToRaw(getOption("shiny.sharedSecret"))
+  if (is.null(sharedSecret)) {
+    function(x) TRUE
+  } else {
+    # We compare the digest of the two values so that their lengths are equalized
+    function(x) {
+      x <- normalizeToRaw(x)
+      # Constant time comparison to avoid timing attacks
+      constantTimeEquals(sharedSecret, x)
+    }
+  }
+}
+
+# Compares two raw vectors of equal length for equality, in constant time
+constantTimeEquals <- function(raw1, raw2) {
+  stopifnot(is.raw(raw1))
+  stopifnot(is.raw(raw2))
+  if (length(raw1) != length(raw2)) {
+    return(FALSE)
+  }
+
+  sum(as.integer(xor(raw1, raw2))) == 0
 }

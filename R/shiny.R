@@ -62,7 +62,7 @@ NULL
 #'     by setting e.g. \code{options(shiny.autoreload.interval = 2000)} (every
 #'     two seconds).}
 #'   \item{shiny.reactlog}{If \code{TRUE}, enable logging of reactive events,
-#'     which can be viewed later with the \code{\link{showReactLog}} function.
+#'     which can be viewed later with the \code{\link{reactlogShow}} function.
 #'     This incurs a substantial performance penalty and should not be used in
 #'     production.}
 #'   \item{shiny.usecairo}{This is used to disable graphical rendering by the
@@ -445,6 +445,8 @@ ShinySession <- R6Class(
     testMode = FALSE,                # Are we running in test mode?
     testExportExprs = list(),
     outputValues = list(),           # Saved output values (for testing mode)
+    currentOutputName = NULL,        # Name of the currently-running output
+    outputInfo = list(),             # List of information for each output
     testSnapshotUrl = character(0),
 
     sendResponse = function(requestMsg, value) {
@@ -490,6 +492,16 @@ ShinySession <- R6Class(
       if (is.null(result))
         return(defaultValue)
       return(result)
+    },
+    withCurrentOutput = function(name, expr) {
+      if (!is.null(private$currentOutputName)) {
+        stop("Nested calls to withCurrentOutput() are not allowed.")
+      }
+
+      promises::with_promise_domain(
+        createVarPromiseDomain(private, "currentOutputName", name),
+        expr
+      )
     },
     shouldSuspend = function(name) {
       # Find corresponding hidden state clientData variable, with the format
@@ -564,7 +576,7 @@ ShinySession <- R6Class(
 
             # Apply preprocessor functions for inputs that have them.
             values$input <- lapply(
-              setNames(names(values$input), names(values$input)),
+              stats::setNames(names(values$input), names(values$input)),
               function(name) {
                 preprocess <- private$getSnapshotPreprocessInput(name)
                 preprocess(values$input[[name]])
@@ -592,7 +604,7 @@ ShinySession <- R6Class(
 
             # Apply snapshotPreprocess functions for outputs that have them.
             values$output <- lapply(
-              setNames(names(values$output), names(values$output)),
+              stats::setNames(names(values$output), names(values$output)),
               function(name) {
                 preprocess <- private$getSnapshotPreprocessOutput(name)
                 preprocess(values$output[[name]])
@@ -671,11 +683,42 @@ ShinySession <- R6Class(
 
     # See cycleStartAction
     startCycle = function() {
+      # TODO: This should check for busyCount == 0L, and remove the checks from
+      # the call sites
       if (length(private$cycleStartActionQueue) > 0) {
         head <- private$cycleStartActionQueue[[1L]]
         private$cycleStartActionQueue <- private$cycleStartActionQueue[-1L]
+
+        # After we execute the current cycleStartAction (head), there may be
+        # more items left on the queue. If the current busyCount > 0, then that
+        # means an async task is running; whenever that task finishes, it will
+        # decrement the busyCount back to 0 and a startCycle will then be
+        # scheduled. But if the current busyCount is 0, it means that either
+        # busyCount was incremented and then decremented; OR that running head()
+        # never touched busyCount (one example of the latter is that an input
+        # changed that didn't actually cause any observers to be invalidated,
+        # i.e. an input that's used in the body of an observeEvent). Because of
+        # the possibility of the latter case, we need to conditionally schedule
+        # a startCycle ourselves to ensure that the remaining queue items get
+        # processed.
+        #
+        # Since we can't actually tell whether head() increment and decremented
+        # busyCount, it's possible we're calling startCycle spuriously; that's
+        # OK, it's essentially a no-op in that case.
+        on.exit({
+          if (private$busyCount == 0L && length(private$cycleStartActionQueue) > 0L) {
+            later::later(function() {
+              if (private$busyCount == 0L) {
+                private$startCycle()
+              }
+            })
+          }
+        }, add = TRUE)
+
         head()
       }
+
+      invisible()
     }
   ),
   public = list(
@@ -691,6 +734,7 @@ ShinySession <- R6Class(
     request = 'ANY',      # Websocket request object
     singletons = character(0),  # Tracks singleton HTML fragments sent to the page
     userData = 'environment',
+    cache = NULL,         # A cache object used in the session
     user = NULL,
     groups = NULL,
 
@@ -706,8 +750,8 @@ ShinySession <- R6Class(
       private$flushCallbacks <- Callbacks$new()
       private$flushedCallbacks <- Callbacks$new()
       private$inputReceivedCallbacks <- Callbacks$new()
-      private$.input      <- ReactiveValues$new(dedupe = FALSE)
-      private$.clientData <- ReactiveValues$new(dedupe = TRUE)
+      private$.input      <- ReactiveValues$new(dedupe = FALSE, label = "input")
+      private$.clientData <- ReactiveValues$new(dedupe = TRUE, label = "clientData")
       private$timingRecorder <- ShinyServerTimingRecorder$new()
       self$progressStack <- Stack$new()
       self$files <- Map$new()
@@ -715,15 +759,15 @@ ShinySession <- R6Class(
       self$userData <- new.env(parent = emptyenv())
 
       self$input <- .createReactiveValues(private$.input, readonly=TRUE)
-      .setLabel(self$input, 'input')
       self$clientData <- .createReactiveValues(private$.clientData, readonly=TRUE)
-      .setLabel(self$clientData, 'clientData')
 
       self$output <- .createOutputWriter(self)
 
       self$token <- createUniqueId(16)
       private$.outputs <- list()
       private$.outputOptions <- list()
+
+      self$cache <- MemoryCache$new()
 
       private$bookmarkCallbacks <- Callbacks$new()
       private$bookmarkedCallbacks <- Callbacks$new()
@@ -901,9 +945,11 @@ ShinySession <- R6Class(
         # Create subdir for this scope
         if (!is.null(state$dir)) {
           scopeState$dir <- file.path(state$dir, namespace)
-          res <- dir.create(scopeState$dir)
-          if (res == FALSE) {
-            stop("Error creating subdirectory for scope ", namespace)
+          if (!dirExists(scopeState$dir)) {
+            res <- dir.create(scopeState$dir)
+            if (res == FALSE) {
+              stop("Error creating subdirectory for scope ", namespace)
+            }
           }
         }
 
@@ -1071,7 +1117,11 @@ ShinySession <- R6Class(
           # to include the $then/$catch calls below?
           hybrid_chain(
             hybrid_chain(
-              shinyCallingHandlers(func()),
+              {
+                private$withCurrentOutput(name, {
+                  shinyCallingHandlers(func())
+                })
+              },
               catch = function(cond) {
                 if (inherits(cond, "shiny.custom.error")) {
                   if (isTRUE(getOption("show.error.messages"))) printError(cond)
@@ -1153,6 +1203,11 @@ ShinySession <- R6Class(
 
       if (self$isClosed())
         return()
+
+      # This is the only place in the session where the restoreContext is
+      # flushed.
+      if (!is.null(self$restoreContext))
+        self$restoreContext$flushPending()
 
       # Return TRUE if there's any stuff to send to the client.
       hasPendingUpdates <- function() {
@@ -1312,6 +1367,47 @@ ShinySession <- R6Class(
         })
         return(dereg)
       }
+    },
+
+    getCurrentOutputInfo = function() {
+      name <- private$currentOutputName
+
+      tmp_info <- private$outputInfo[[name]] %OR% list(name = name)
+
+      # cd_names() returns names of all items in clientData, without taking a
+      # reactive dependency. It is a function and it's memoized, so that we do
+      # the (relatively) expensive isolate(names(...)) call only when needed,
+      # and at most one time in this function.
+      .cd_names <- NULL
+      cd_names <- function() {
+        if (is.null(.cd_names)) {
+          .cd_names <<- isolate(names(self$clientData))
+        }
+        .cd_names
+      }
+
+      # If we don't already have width for this output info, see if it's
+      # present, and if so, add it.
+      if (! ("width" %in% names(tmp_info)) ) {
+        width_name  <- paste0("output_", name, "_width")
+        if (width_name %in% cd_names()) {
+          tmp_info$width <- reactive({
+            self$clientData[[width_name]]
+          })
+        }
+      }
+
+      if (! ("height" %in% names(tmp_info)) ) {
+        height_name  <- paste0("output_", name, "_height")
+        if (height_name %in% cd_names()) {
+          tmp_info$height <- reactive({
+            self$clientData[[height_name]]
+          })
+        }
+      }
+
+      private$outputInfo[[name]] <- tmp_info
+      private$outputInfo[[name]]
     },
 
     createBookmarkObservers = function() {
@@ -1932,6 +2028,7 @@ ShinySession <- R6Class(
     },
     incrementBusyCount = function() {
       if (private$busyCount == 0L) {
+        rLog$asyncStart(domain = self)
         private$sendMessage(busy = "busy")
       }
       private$busyCount <- private$busyCount + 1L
@@ -1939,6 +2036,7 @@ ShinySession <- R6Class(
     decrementBusyCount = function() {
       private$busyCount <- private$busyCount - 1L
       if (private$busyCount == 0L) {
+        rLog$asyncStop(domain = self)
         private$sendMessage(busy = "idle")
         self$requestFlush()
         # We defer the call to startCycle() using later(), to defend against
@@ -2057,6 +2155,16 @@ outputOptions <- function(x, name, ...) {
   .subset2(x, 'impl')$outputOptions(name, ...)
 }
 
+
+#' Get information about the output that is currently being executed.
+#'
+#' @param session The current Shiny session.
+#'
+#' @export
+getCurrentOutputInfo <- function(session = getDefaultReactiveDomain()) {
+  session$getCurrentOutputInfo()
+}
+
 #' Add callbacks for Shiny session events
 #'
 #' These functions are for registering callbacks on Shiny session events.
@@ -2125,7 +2233,9 @@ flushPendingSessions <- function() {
 #'   called from within the server function, this will default to the current
 #'   session, and the callback will be invoked when the current session ends. If
 #'   \code{onStop} is called outside a server function, then the callback will
-#'   be invoked with the application exits.
+#'   be invoked with the application exits. If \code{NULL}, it is the same as
+#'   calling \code{onStop} outside of the server function, and the callback will
+#'   be invoked when the application exits.
 #'
 #'
 #' @seealso \code{\link{onSessionEnded}()} for the same functionality, but at
@@ -2185,7 +2295,7 @@ flushPendingSessions <- function() {
 #' }
 #' @export
 onStop <- function(fun, session = getDefaultReactiveDomain()) {
-  if (is.null(getDefaultReactiveDomain())) {
+  if (is.null(session)) {
     return(.globals$onStopCallbacks$register(fun))
   } else {
     # Note: In the future if we allow scoping the onStop() callback to modules

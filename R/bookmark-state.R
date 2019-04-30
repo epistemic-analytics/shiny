@@ -426,7 +426,7 @@ RestoreInputSet <- R6Class("RestoreInputSet",
     },
 
     asList = function() {
-      as.list.environment(private$values)
+      as.list.environment(private$values, all.names = TRUE)
     }
   )
 )
@@ -448,7 +448,13 @@ withRestoreContext <- function(ctx, expr) {
 
 # Is there a current restore context?
 hasCurrentRestoreContext <- function() {
-  restoreCtxStack$size() > 0
+  if (restoreCtxStack$size() > 0)
+    return(TRUE)
+  domain <- getDefaultReactiveDomain()
+  if (!is.null(domain) && !is.null(domain$restoreContext))
+    return(TRUE)
+  
+  return(FALSE)
 }
 
 # Call to access the current restore context. First look on the restore

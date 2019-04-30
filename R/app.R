@@ -170,7 +170,14 @@ shinyAppDir_serverR <- function(appDir, options=list()) {
   }
 
   wwwDir <- file.path.ci(appDir, "www")
+  if (dirExists(wwwDir)) {
+    staticPaths <- list("/" = staticPath(wwwDir, indexhtml = FALSE, fallthrough = TRUE))
+  } else {
+    staticPaths <- list()
+  }
+
   fallbackWWWDir <- system.file("www-dir", package = "shiny")
+
   serverSource <- cachedFuncWithFile(appDir, "server.R", case.sensitive = FALSE,
     function(serverR) {
       # If server.R contains a call to shinyServer (which sets .globals$server),
@@ -220,6 +227,13 @@ shinyAppDir_serverR <- function(appDir, options=list()) {
 
   structure(
     list(
+      staticPaths = staticPaths,
+      # Even though the wwwDir is handled as a static path, we need to include
+      # it here to be handled by R as well. This is because the special case
+      # of index.html: it is specifically not handled as a staticPath for
+      # reasons explained above, but if someone does want to serve up an
+      # index.html, we need to handle it, and we do it by using the
+      # staticHandler in the R code path. (#2380)
       httpHandler = joinHandlers(c(uiHandler, wwwDir, fallbackWWWDir)),
       serverFuncSource = serverFuncSource,
       onStart = onStart,
@@ -309,6 +323,20 @@ shinyAppDir_appR <- function(fileName, appDir, options=list())
   }
 
   wwwDir <- file.path.ci(appDir, "www")
+  if (dirExists(wwwDir)) {
+    # wwwDir is a static path served by httpuv. It does _not_ serve up
+    # index.html, for two reasons. (1) It's possible that the user's
+    # www/index.html file is not actually used as the index, but as a template
+    # that gets processed before being sent; and (2) the index content may be
+    # modified by the hosting environment (as in SockJSAdapter.R).
+    #
+    # The call to staticPath normalizes the path, so that if the working dir
+    # later changes, it will continue to point to the right place.
+    staticPaths <- list("/" = staticPath(wwwDir, indexhtml = FALSE, fallthrough = TRUE))
+  } else {
+    staticPaths <- list()
+  }
+
   fallbackWWWDir <- system.file("www-dir", package = "shiny")
 
   oldwd <- NULL
@@ -327,6 +355,18 @@ shinyAppDir_appR <- function(fileName, appDir, options=list())
 
   structure(
     list(
+      # fallbackWWWDir is _not_ listed in staticPaths, because it needs to
+      # come after the uiHandler. It also does not need to be fast, since it
+      # should rarely be hit. The order is wwwDir (in staticPaths), then
+      # uiHandler, then falbackWWWDir (which is served up by the R
+      # staticHandler function).
+      staticPaths = staticPaths,
+      # Even though the wwwDir is handled as a static path, we need to include
+      # it here to be handled by R as well. This is because the special case
+      # of index.html: it is specifically not handled as a staticPath for
+      # reasons explained above, but if someone does want to serve up an
+      # index.html, we need to handle it, and we do it by using the
+      # staticHandler in the R code path. (#2380)
       httpHandler = joinHandlers(c(dynHttpHandler, wwwDir, fallbackWWWDir)),
       serverFuncSource = dynServerFuncSource,
       onStart = onStart,
