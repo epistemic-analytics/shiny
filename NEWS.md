@@ -1,10 +1,37 @@
 shiny 1.3.2.9000
 =======
 
+## Changes
+
+* Resolved [#1433](https://github.com/rstudio/shiny/issues/1433): `plotOutput()`'s coordmap info now includes discrete axis limits for **ggplot2** plots. As a result, any **shinytest** tests that contain **ggplot2** plots with discrete axes (that were recorded before this change) will now report differences that can safely be updated. This new coordmap info was added to correctly infer what data points are within an input brush and/or near input click/hover in scenarios where a non-trivial discrete axis scale is involved (e.g., whenever `scale_[x/y]_discrete(limits = ...)` and/or free scales across multiple discrete axes are used). ([#2410](https://github.com/rstudio/shiny/pull/2410))
+
+### Improvements
+
+* Resolved [#2402](https://github.com/rstudio/shiny/issues/2402): An informative warning is now thrown for mis-specified (date) strings in `dateInput()`, `updateDateInput()`, `dateRangeInput()`, and `updateDateRangeInput()`. ([#2403](https://github.com/rstudio/shiny/pull/2403))
+
+* Resolved [#2442](https://github.com/rstudio/shiny/issues/2442): The `shiny:inputchanged` JavaScript event now triggers on the related input element instead of `document`. Existing event listeners bound to `document` will still detect the event due to event bubbling. ([#2446](https://github.com/rstudio/shiny/pull/2446))
+
+* Fixed [#1393](https://github.com/rstudio/shiny/issues/1393), [#2223](https://github.com/rstudio/shiny/issues/2223): For plots with any interactions enabled, the image is no longer draggable. ([#2460](https://github.com/rstudio/shiny/pull/2460))
+
+* Partially resolved [#2423](https://github.com/rstudio/shiny/issues/2423): Reactivity in Shiny leaked some memory, because R can leak memory whenever a new symbols is interned, which happens whenever a new name/key is used in an environment. R now uses the fastmap package, which avoids this problem. ([#2429](https://github.com/rstudio/shiny/pull/2429))
+
+* Resolved [#2469](https://github.com/rstudio/shiny/issues/2469): `renderText` now takes a `sep` argument that is passed to `cat`. ([#2497](https://github.com/rstudio/shiny/pull/2497))
+
 ### Bug fixes
+
+* Fixed [#2387](https://github.com/rstudio/shiny/issues/2387): Updating a `sliderInput()`'s type from numeric to date no longer changes the rate policy from debounced to immediate. More generally, updating an input binding with a new type should (no longer) incorrectly alter the input rate policy. ([#2404](https://github.com/rstudio/shiny/pull/2404))
+
+* Fixed [#868](https://github.com/rstudio/shiny/issues/868): If an input is initialized with a `NULL` label, it can now be updated with a string. Moreover, if an input label is initialized with a string, it can now be removed by updating with `label=character(0)` (similar to how `choices` and `selected` can be cleared in `updateSelectInput()`). ([#2406](https://github.com/rstudio/shiny/pull/2406))
+
+* Fixed [#2250](https://github.com/rstudio/shiny/issues/2250): `updateSliderInput()` now works with un-specified (or zero-length) `min`, `max`, and `value`. ([#2416](https://github.com/rstudio/shiny/pull/2416))
+
+* Fixed [#2396](https://github.com/rstudio/shiny/issues/2396): `selectInput("myID", ...)` resulting in an extra `myID-selectized` input (introduced in v1.2.0). ([#2418](https://github.com/rstudio/shiny/pull/2418))
 
 * Fixed [#2233](https://github.com/rstudio/shiny/issues/2233): `verbatimTextOutput()` produced wrapped text on Safari, but the text should not be wrapped. ([#2353](https://github.com/rstudio/shiny/pull/2353))
 
+* Fixed [rstudio/reactlog#36](https://github.com/rstudio/reactlog/issues/36): Changes to reactive values not displaying accurately in reactlog. ([#2424](https://github.com/rstudio/shiny/pull/2424))
+
+* Fixed [#2329](https://github.com/rstudio/shiny/issues/2329), [#1817](https://github.com/rstudio/shiny/issues/1817): These bugs were reported as fixed in Shiny 1.3.0 but were not actually fixed because some JavaScript changes were accidentally not included in the release. The fix resolves issues that occur when `withProgressBar()` or bookmarking are combined with the [networkD3](https://christophergandrud.github.io/networkD3/) package's Sankey plot.
 
 shiny 1.3.2
 ===========

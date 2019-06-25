@@ -12,7 +12,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
 
   var exports = window.Shiny = window.Shiny || {};
 
-  exports.version = "1.3.2"; // Version number inserted by Grunt
+  exports.version = "1.3.2.9000"; // Version number inserted by Grunt
 
   var origPushState = window.history.pushState;
   window.history.pushState = function () {
@@ -321,6 +321,24 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     if (op === "==") return diff === 0;else if (op === ">=") return diff >= 0;else if (op === ">") return diff > 0;else if (op === "<=") return diff <= 0;else if (op === "<") return diff < 0;else throw "Unknown operator: " + op;
   };
 
+  function updateLabel(labelTxt, labelNode) {
+    // Only update if label was specified in the update method
+    if (typeof labelTxt === "undefined") return;
+    if (labelNode.length !== 1) {
+      throw new Error("labelNode must be of length 1");
+    }
+
+    // Should the label be empty?
+    var emptyLabel = $.isArray(labelTxt) && labelTxt.length === 0;
+
+    if (emptyLabel) {
+      labelNode.addClass("shiny-label-null");
+    } else {
+      labelNode.text(labelTxt);
+      labelNode.removeClass("shiny-label-null");
+    }
+  }
+
   //---------------------------------------------------------------------
   // Source file: ../srcjs/browser.js
 
@@ -545,8 +563,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.lastChanceCallback = [];
   };
   (function () {
-    this.setInput = function (name, value, opts) {
-      this.pendingData[name] = value;
+    this.setInput = function (nameType, value, opts) {
+      this.pendingData[nameType] = value;
 
       if (!this.reentrant) {
         if (opts.priority === "event") {
@@ -582,8 +600,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.lastSentValues = this.reset(initialValues);
   };
   (function () {
-    this.setInput = function (name, value, opts) {
-      var _splitInputNameType = splitInputNameType(name);
+    this.setInput = function (nameType, value, opts) {
+      var _splitInputNameType = splitInputNameType(nameType);
 
       var inputName = _splitInputNameType.name;
       var inputType = _splitInputNameType.inputType;
@@ -610,10 +628,10 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         if (values.hasOwnProperty(inputName)) {
           var _splitInputNameType2 = splitInputNameType(inputName);
 
-          var name = _splitInputNameType2.name;
+          var _name = _splitInputNameType2.name;
           var inputType = _splitInputNameType2.inputType;
 
-          cacheValues[name] = {
+          cacheValues[_name] = {
             jsonValue: JSON.stringify(values[inputName]),
             inputType: inputType
           };
@@ -628,10 +646,10 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.target = target;
   };
   (function () {
-    this.setInput = function (name, value, opts) {
+    this.setInput = function (nameType, value, opts) {
       var evt = jQuery.Event("shiny:inputchanged");
 
-      var input = splitInputNameType(name);
+      var input = splitInputNameType(nameType);
       evt.name = input.name;
       evt.inputType = input.inputType;
       evt.value = value;
@@ -639,7 +657,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       evt.el = opts.el;
       evt.priority = opts.priority;
 
-      $(document).trigger(evt);
+      $(opts.el).trigger(evt);
 
       if (!evt.isDefaultPrevented()) {
         name = evt.name;
@@ -657,25 +675,41 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.inputRatePolicies = {};
   };
   (function () {
-    this.setInput = function (name, value, opts) {
-      this.$ensureInit(name);
+    // Note that the first argument of setInput() and setRatePolicy()
+    // are passed both the input name (i.e., inputId) and type.
+    // https://github.com/rstudio/shiny/blob/67d3a/srcjs/init_shiny.js#L111-L126
+    // However, $ensureInit() and $doSetInput() are meant to be passed just
+    // the input name (i.e., inputId), which is why we distinguish between
+    // nameType and name.
+    this.setInput = function (nameType, value, opts) {
+      var _splitInputNameType3 = splitInputNameType(nameType);
 
-      if (opts.priority !== "deferred") this.inputRatePolicies[name].immediateCall(name, value, opts);else this.inputRatePolicies[name].normalCall(name, value, opts);
+      var inputName = _splitInputNameType3.name;
+
+
+      this.$ensureInit(inputName);
+
+      if (opts.priority !== "deferred") this.inputRatePolicies[inputName].immediateCall(nameType, value, opts);else this.inputRatePolicies[inputName].normalCall(nameType, value, opts);
     };
-    this.setRatePolicy = function (name, mode, millis) {
+    this.setRatePolicy = function (nameType, mode, millis) {
+      var _splitInputNameType4 = splitInputNameType(nameType);
+
+      var inputName = _splitInputNameType4.name;
+
+
       if (mode === 'direct') {
-        this.inputRatePolicies[name] = new Invoker(this, this.$doSetInput);
+        this.inputRatePolicies[inputName] = new Invoker(this, this.$doSetInput);
       } else if (mode === 'debounce') {
-        this.inputRatePolicies[name] = new Debouncer(this, this.$doSetInput, millis);
+        this.inputRatePolicies[inputName] = new Debouncer(this, this.$doSetInput, millis);
       } else if (mode === 'throttle') {
-        this.inputRatePolicies[name] = new Throttler(this, this.$doSetInput, millis);
+        this.inputRatePolicies[inputName] = new Throttler(this, this.$doSetInput, millis);
       }
     };
     this.$ensureInit = function (name) {
       if (!(name in this.inputRatePolicies)) this.setRatePolicy(name, 'direct');
     };
-    this.$doSetInput = function (name, value, opts) {
-      this.target.setInput(name, value, opts);
+    this.$doSetInput = function (nameType, value, opts) {
+      this.target.setInput(nameType, value, opts);
     };
   }).call(InputRateDecorator.prototype);
 
@@ -684,8 +718,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.pendingInput = {};
   };
   (function () {
-    this.setInput = function (name, value, opts) {
-      if (/^\./.test(name)) this.target.setInput(name, value, opts);else this.pendingInput[name] = { value: value, opts: opts };
+    this.setInput = function (nameType, value, opts) {
+      if (/^\./.test(nameType)) this.target.setInput(nameType, value, opts);else this.pendingInput[name] = { value: value, opts: opts };
     };
     this.submit = function () {
       for (var name in this.pendingInput) {
@@ -701,12 +735,12 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     this.target = target;
   };
   (function () {
-    this.setInput = function (name, value, opts) {
-      if (!name) throw "Can't set input with empty name.";
+    this.setInput = function (nameType, value, opts) {
+      if (!nameType) throw "Can't set input with empty name.";
 
       opts = addDefaultInputOpts(opts);
 
-      this.target.setInput(name, value, opts);
+      this.target.setInput(nameType, value, opts);
     };
   }).call(InputValidateDecorator.prototype);
 
@@ -733,8 +767,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     return opts;
   }
 
-  function splitInputNameType(name) {
-    var name2 = name.split(':');
+  function splitInputNameType(nameType) {
+    var name2 = nameType.split(':');
     return {
       name: name2[0],
       inputType: name2.length > 1 ? name2[1] : ''
@@ -1771,7 +1805,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
           var $container = $('.shiny-progress-container');
           if ($container.length === 0) {
             $container = $('<div class="shiny-progress-container"></div>');
-            $('body').append($container);
+            $(document.body).append($container);
           }
 
           // Add div for just this progress ID
@@ -2025,7 +2059,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
 
       if ($panel.length > 0) return $panel;
 
-      $('body').append('<div id="shiny-notification-panel">');
+      $(document.body).append('<div id="shiny-notification-panel">');
 
       return $panel;
     }
@@ -2105,7 +2139,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       var $modal = $('#shiny-modal-wrapper');
       if ($modal.length === 0) {
         $modal = $('<div id="shiny-modal-wrapper"></div>');
-        $('body').append($modal);
+        $(document.body).append($modal);
 
         // If the wrapper's content is a Bootstrap modal, then when the inner
         // modal is hidden, remove the entire thing, including wrapper.
@@ -2476,6 +2510,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         // Register the various event handlers
         // ----------------------------------------------------------
         if (opts.clickId) {
+          imageutils.disableDrag($el, $img);
+
           var clickHandler = imageutils.createClickHandler(opts.clickId, opts.clickClip, opts.coordmap);
           $el.on('mousedown2.image_output', clickHandler.mousedown);
 
@@ -2487,6 +2523,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         }
 
         if (opts.dblclickId) {
+          imageutils.disableDrag($el, $img);
+
           // We'll use the clickHandler's mousedown function, but register it to
           // our custom 'dblclick2' event.
           var dblclickHandler = imageutils.createClickHandler(opts.dblclickId, opts.clickClip, opts.coordmap);
@@ -2497,6 +2535,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         }
 
         if (opts.hoverId) {
+          imageutils.disableDrag($el, $img);
+
           var hoverHandler = imageutils.createHoverHandler(opts.hoverId, opts.hoverDelay, opts.hoverDelayType, opts.hoverClip, opts.hoverNullOutside, opts.coordmap);
           $el.on('mousemove.image_output', hoverHandler.mousemove);
           $el.on('mouseout.image_output', hoverHandler.mouseout);
@@ -2506,17 +2546,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         }
 
         if (opts.brushId) {
-          // Make image non-draggable (Chrome, Safari)
-          $img.css('-webkit-user-drag', 'none');
-          // Firefox, IE<=10
-          $img.on('dragstart.image_output', function () {
-            return false;
-          });
-
-          // Disable selection of image and text when dragging in IE<=10
-          $el.on('selectstart.image_output', function () {
-            return false;
-          });
+          imageutils.disableDrag($el, $img);
 
           var brushHandler = imageutils.createBrushHandler(opts.brushId, $el, opts, opts.coordmap, outputId);
           $el.on('mousedown.image_output', brushHandler.mousedown);
@@ -2556,6 +2586,24 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
   outputBindings.register(imageOutputBinding, 'shiny.imageOutput');
 
   var imageutils = {};
+
+  imageutils.disableDrag = function ($el, $img) {
+    // Make image non-draggable (Chrome, Safari)
+    $img.css('-webkit-user-drag', 'none');
+
+    // Firefox, IE<=10
+    // First remove existing handler so we don't keep adding handlers.
+    $img.off('dragstart.image_output');
+    $img.on('dragstart.image_output', function () {
+      return false;
+    });
+
+    // Disable selection of image and text when dragging in IE<=10
+    $el.off('selectstart.image_output');
+    $el.on('selectstart.image_output', function () {
+      return false;
+    });
+  };
 
   // Modifies the panel objects in a coordmap, adding scaleImgToData(),
   // scaleDataToImg(), and clipImg() functions to each one. The panel objects
@@ -4301,7 +4349,12 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
   var textInputBinding = new InputBinding();
   $.extend(textInputBinding, {
     find: function find(scope) {
-      return $(scope).find('input[type="text"], input[type="search"], input[type="url"], input[type="email"]');
+      var $inputs = $(scope).find('input[type="text"], input[type="search"], input[type="url"], input[type="email"]');
+      // selectize.js 0.12.4 inserts a hidden text input with an
+      // id that ends in '-selectized'. The .not() selector below
+      // is to prevent textInputBinding from accidentally picking up
+      // this hidden element as a shiny input (#2396)
+      return $inputs.not('input[type="text"][id$="-selectized"]');
     },
     getId: function getId(el) {
       return InputBinding.prototype.getId.call(this, el) || el.name;
@@ -4326,7 +4379,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     receiveMessage: function receiveMessage(el, data) {
       if (data.hasOwnProperty('value')) this.setValue(el, data.value);
 
-      if (data.hasOwnProperty('label')) $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       if (data.hasOwnProperty('placeholder')) el.placeholder = data.placeholder;
 
@@ -4334,7 +4387,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     },
     getState: function getState(el) {
       return {
-        label: $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(),
+        label: this._getLabelNode(el).text(),
         value: el.value,
         placeholder: el.placeholder
       };
@@ -4344,6 +4397,9 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         policy: 'debounce',
         delay: 250
       };
+    },
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).parent().find('label[for="' + $escape(el.id) + '"]');
     }
   });
   inputBindings.register(textInputBinding, 'shiny.textInput');
@@ -4399,16 +4455,19 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       if (data.hasOwnProperty('max')) el.max = data.max;
       if (data.hasOwnProperty('step')) el.step = data.step;
 
-      if (data.hasOwnProperty('label')) $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       $(el).trigger('change');
     },
     getState: function getState(el) {
-      return { label: $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(),
+      return { label: this._getLabelNode(el).text(),
         value: this.getValue(el),
         min: Number(el.min),
         max: Number(el.max),
         step: Number(el.step) };
+    },
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).parent().find('label[for="' + $escape(el.id) + '"]');
     }
   });
   inputBindings.register(numberInputBinding, 'shiny.numberInput');
@@ -4444,6 +4503,8 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     receiveMessage: function receiveMessage(el, data) {
       if (data.hasOwnProperty('value')) el.checked = data.value;
 
+      // checkboxInput()'s label works different from other
+      // input labels...the label container should always exist
       if (data.hasOwnProperty('label')) $(el).parent().find('span').text(data.label);
 
       $(el).trigger('change');
@@ -4572,7 +4633,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         }
       }
 
-      if (data.hasOwnProperty('label')) $el.parent().find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       var domElements = ['data-type', 'time-format', 'timezone'];
       for (var i = 0; i < domElements.length; i++) {
@@ -4614,7 +4675,9 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
 
       $el.ionRangeSlider(opts);
     },
-
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).parent().find('label[for="' + $escape(el.id) + '"]');
+    },
     // Number of values; 1 for single slider, 2 for range slider
     _numValues: function _numValues(el) {
       if ($(el).data('ionRangeSlider').options.type === 'double') return 2;else return 1;
@@ -4776,7 +4839,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       if (startview === 2) startview = 'decade';else if (startview === 1) startview = 'year';else if (startview === 0) startview = 'month';
 
       return {
-        label: $el.find('label[for="' + $escape(el.id) + '"]').text(),
+        label: this._getLabelNode(el).text(),
         value: this.getValue(el),
         valueString: $input.val(),
         min: min,
@@ -4790,7 +4853,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     receiveMessage: function receiveMessage(el, data) {
       var $input = $(el).find('input');
 
-      if (data.hasOwnProperty('label')) $(el).find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       if (data.hasOwnProperty('min')) this._setMin($input[0], data.min);
 
@@ -4844,6 +4907,9 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       if ($input.data('max-date') !== undefined) {
         this._setMax($input[0], $input.data('max-date'));
       }
+    },
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).find('label[for="' + $escape(el.id) + '"]');
     },
     // Given a format object from a date picker, return a string
     _formatToString: function _formatToString(format) {
@@ -4991,7 +5057,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       if (startview === 2) startview = 'decade';else if (startview === 1) startview = 'year';else if (startview === 0) startview = 'month';
 
       return {
-        label: $el.find('label[for="' + $escape(el.id) + '"]').text(),
+        label: this._getLabelNode(el).text(),
         value: this.getValue(el),
         valueString: [$startinput.val(), $endinput.val()],
         min: min,
@@ -5008,7 +5074,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       var $startinput = $inputs.eq(0);
       var $endinput = $inputs.eq(1);
 
-      if (data.hasOwnProperty('label')) $el.find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       if (data.hasOwnProperty('min')) {
         this._setMin($startinput[0], data.min);
@@ -5064,6 +5130,9 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     },
     unsubscribe: function unsubscribe(el) {
       $(el).off('.dateRangeInputBinding');
+    },
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).find('label[for="' + $escape(el.id) + '"]');
     }
   });
   inputBindings.register(dateRangeInputBinding, 'shiny.dateRangeInput');
@@ -5113,7 +5182,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       }
 
       return {
-        label: $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(),
+        label: this._getLabelNode(el),
         value: this.getValue(el),
         options: options
       };
@@ -5195,13 +5264,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
         this.setValue(el, data.value);
       }
 
-      if (data.hasOwnProperty('label')) {
-        var escaped_id = $escape(el.id);
-        if (this._is_selectize(el)) {
-          escaped_id += "-selectized";
-        }
-        $(el).parent().parent().find('label[for="' + escaped_id + '"]').text(data.label);
-      }
+      updateLabel(data.label, this._getLabelNode(el));
 
       $(el).trigger('change');
     },
@@ -5223,6 +5286,13 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     },
     initialize: function initialize(el) {
       this._selectize(el);
+    },
+    _getLabelNode: function _getLabelNode(el) {
+      var escaped_id = $escape(el.id);
+      if (this._is_selectize(el)) {
+        escaped_id += "-selectized";
+      }
+      return $(el).parent().parent().find('label[for="' + escaped_id + '"]');
     },
     // Return true if it's a selectize input, false if it's a regular select input.
     _is_selectize: function _is_selectize(el) {
@@ -5301,7 +5371,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       }
 
       return {
-        label: $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(),
+        label: this._getLabelNode(el).text(),
         value: this.getValue(el),
         options: options
       };
@@ -5320,7 +5390,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
 
       if (data.hasOwnProperty('value')) this.setValue(el, data.value);
 
-      if (data.hasOwnProperty('label')) $(el).parent().find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       $(el).trigger('change');
     },
@@ -5331,6 +5401,10 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     },
     unsubscribe: function unsubscribe(el) {
       $(el).off('.radioInputBinding');
+    },
+    // Get the DOM element that contains the top-level label
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).parent().find('label[for="' + $escape(el.id) + '"]');
     },
     // Given an input DOM object, get the associated label. Handles labels
     // that wrap the input as well as labels associated with 'for' attribute.
@@ -5397,7 +5471,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
           label: this._getLabel($objs[i]) };
       }
 
-      return { label: $(el).find('label[for="' + $escape(el.id) + '"]').text(),
+      return { label: this._getLabelNode(el).text(),
         value: this.getValue(el),
         options: options
       };
@@ -5416,7 +5490,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
 
       if (data.hasOwnProperty('value')) this.setValue(el, data.value);
 
-      if (data.hasOwnProperty('label')) $el.find('label[for="' + $escape(el.id) + '"]').text(data.label);
+      updateLabel(data.label, this._getLabelNode(el));
 
       $(el).trigger('change');
     },
@@ -5427,6 +5501,10 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     },
     unsubscribe: function unsubscribe(el) {
       $(el).off('.checkboxGroupInputBinding');
+    },
+    // Get the DOM element that contains the top-level label
+    _getLabelNode: function _getLabelNode(el) {
+      return $(el).find('label[for="' + $escape(el.id) + '"]');
     },
     // Given an input DOM object, get the associated label. Handles labels
     // that wrap the input as well as labels associated with 'for' attribute.
@@ -5593,7 +5671,7 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
       this.iframe.id = iframeId;
       this.iframe.name = iframeId;
       this.iframe.setAttribute('style', 'position: fixed; top: 0; left: 0; width: 0; height: 0; border: none');
-      $('body').append(this.iframe);
+      $(document.body).append(this.iframe);
       var iframeDestroy = function iframeDestroy() {
         // Forces Shiny to flushReact, flush outputs, etc. Without this we get
         // invalidated reactives, but observers don't actually execute.
@@ -6457,14 +6535,14 @@ function _defineProperty(obj, key, value) { if (key in obj) { Object.definePrope
     // Need to register callbacks for each Bootstrap 3 class.
     var bs3classes = ['modal', 'dropdown', 'tab', 'tooltip', 'popover', 'collapse'];
     $.each(bs3classes, function (idx, classname) {
-      $('body').on('shown.bs.' + classname + '.sendImageSize', '*', filterEventsByNamespace('bs', sendImageSize));
-      $('body').on('shown.bs.' + classname + '.sendOutputHiddenState ' + 'hidden.bs.' + classname + '.sendOutputHiddenState', '*', filterEventsByNamespace('bs', sendOutputHiddenState));
+      $(document.body).on('shown.bs.' + classname + '.sendImageSize', '*', filterEventsByNamespace('bs', sendImageSize));
+      $(document.body).on('shown.bs.' + classname + '.sendOutputHiddenState ' + 'hidden.bs.' + classname + '.sendOutputHiddenState', '*', filterEventsByNamespace('bs', sendOutputHiddenState));
     });
 
     // This is needed for Bootstrap 2 compatibility and for non-Bootstrap
     // related shown/hidden events (like conditionalPanel)
-    $('body').on('shown.sendImageSize', '*', sendImageSize);
-    $('body').on('shown.sendOutputHiddenState hidden.sendOutputHiddenState', '*', sendOutputHiddenState);
+    $(document.body).on('shown.sendImageSize', '*', sendImageSize);
+    $(document.body).on('shown.sendOutputHiddenState hidden.sendOutputHiddenState', '*', sendOutputHiddenState);
 
     // Send initial pixel ratio, and update it if it changes
     initialValues['.clientdata_pixelratio'] = pixelRatio();
