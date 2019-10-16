@@ -171,11 +171,12 @@ var ShinyApp = function() {
         var i = attempts;
         // Instead of going off the end, use the last one
         if (i >= delays.length) {
-          i = delays.length - 1;
+          //i = delays.length - 1;
+          return(undefined);
+        } else {
+          attempts++;
+          return delays[i];
         }
-
-        attempts++;
-        return delays[i];
       },
       reset: function() {
         attempts = 0;
@@ -1222,26 +1223,36 @@ exports.showReconnectDialog = (function() {
 
 
   return function(delay) {
-    reconnectTime = new Date().getTime() + delay;
+    var html, action, id;
 
-    // If there's already a reconnect dialog, don't add another
-    if ($('#shiny-reconnect-text').length > 0)
-      return;
+    if(delay) {
+      reconnectTime = new Date().getTime() + delay;
 
-    var html = '<span id="shiny-reconnect-text">Attempting to reconnect</span>' +
-               '<span id="shiny-reconnect-time"></span>';
-    var action = '<a id="shiny-reconnect-now" href="#" onclick="Shiny.shinyapp.reconnect();">Try now</a>';
+      // If there's already a reconnect dialog, don't add another
+      if ($('#shiny-reconnect-text').length > 0)
+        return;
 
-    exports.notifications.show({
-      id: "reconnect",
-      html: html,
-      action: action,
-      duration: null,
-      closeButton: false,
-      type: 'warning'
-    });
+      exports.notifications.show({
+        id: "reconnect",
+        html: '<span id="shiny-reconnect-text">Attempting to reconnect</span>' +
+                 '<span id="shiny-reconnect-time"></span>',
+        action: '<a id="shiny-reconnect-now" href="#" onclick="Shiny.shinyapp.reconnect();">Try now</a>',
+        duration: null,
+        closeButton: false,
+        type: 'warning'
+      });
 
-    updateTime();
+      updateTime();
+    } else {
+      exports.notifications.show({
+        id: "reconnect",
+        html: '<span id="shiny-reconnect-text">Automatic reconnect failed after too many attempts.</span>',
+        action: '<a id="shiny-reconnect-now" href="#" onclick="window.location.reload();">Please refresh</a>',
+        duration: null,
+        closeButton: false,
+        type: 'warning'
+      });
+    }
   };
 })();
 
