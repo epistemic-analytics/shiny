@@ -723,6 +723,12 @@ ShinySession <- R6Class(
     requestFlush = function() {
       appsNeedingFlush$set(self$token, self)
     },
+    .scheduleTask = function(millis, callback) {
+      scheduleTask(millis, callback)
+    },
+    .now = function(){
+      getTimeMs()
+    },
     rootScope = function() {
       self
     },
@@ -1291,6 +1297,9 @@ ShinySession <- R6Class(
 
     getCurrentOutputInfo = function() {
       name <- private$currentOutputName
+      if (is.null(name)) {
+        return(NULL)
+      }
 
       tmp_info <- private$outputInfo[[name]] %OR% list(name = name)
 
@@ -2089,6 +2098,10 @@ outputOptions <- function(x, name, ...) {
 
 
 #' Get information about the output that is currently being executed.
+#'
+#' @return A list with information about the current output, including the
+#'   `name` of the output. If no output is currently being executed, this will
+#'   return `NULL`.
 #'
 #' @param session The current Shiny session.
 #'

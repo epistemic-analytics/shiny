@@ -5,14 +5,14 @@ matrix:
       r: release
       r_packages:
         - devtools
-        - roxygen2
+        - rprojroot
       script: ./tools/checkDocsCurrent.sh
     - name: "Javascript check"
       language: node_js
       cache: yarn
       script: ./tools/checkJSCurrent.sh
       node_js:
-        - "10"
+        - "12"
     - r: 3.2
     - r: 3.3
     - r: 3.4

@@ -11,14 +11,16 @@ install:
   ps: Bootstrap
 
 cache:
-  - C:\RLibrary
+  # Bust library cache every time the description file changes
+  #   as appveyor cache can not be busted manually
+  # This helps get around errors such as "can't update curl because it's already loaded"
+  #  when trying to update the existing cache
+  # PR: https://github.com/rstudio/shiny/pull/2722
+  - C:\RLibrary -> DESCRIPTION
 
 # Adapt as necessary starting from here
 
 build_script:
-  - travis-tool.sh install_github rstudio/htmltools@rc-v0.4.0
-  - travis-tool.sh install_github rstudio/promises@rc-v1.1.0
-  - travis-tool.sh install_github r-lib/later@rc-v1.0.0
   - travis-tool.sh install_deps
 
 test_script:

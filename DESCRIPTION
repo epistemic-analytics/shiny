@@ -1,7 +1,7 @@
 Package: shiny
 Type: Package
 Title: Web Application Framework for R
-Version: 1.4.0.9000
+Version: 1.4.0.9001
 Authors@R: c(
     person("Winston", "Chang", role = c("aut", "cre"), email = "winston@rstudio.com"),
     person("Joe", "Cheng", role = "aut", email = "joe@rstudio.com"),
@@ -70,7 +70,7 @@ Imports:
     jsonlite (>= 0.9.16),
     xtable,
     digest,
-    htmltools (>= 0.4.0),
+    htmltools (>= 0.4.0.9001),
     R6 (>= 2.0),
     sourcetools,
     later (>= 1.0.0),
@@ -78,7 +78,8 @@ Imports:
     tools,
     crayon,
     rlang (>= 0.4.0),
-    fastmap (>= 1.0.0)
+    fastmap (>= 1.0.0),
+    withr
 Suggests:
     datasets,
     Cairo (>= 1.5-5),
@@ -89,7 +90,12 @@ Suggests:
     ggplot2,
     reactlog (>= 1.0.0),
     magrittr,
-    yaml
+    shinytest,
+    yaml,
+    future,
+    dygraphs
+Remotes:
+    rstudio/htmltools
 URL: http://shiny.rstudio.com
 BugReports: https://github.com/rstudio/shiny/issues
 Collate:
@@ -141,6 +147,8 @@ Collate:
     'jqueryui.R'
     'middleware-shiny.R'
     'middleware.R'
+    'timer.R'
+    'mock-session.R'
     'modal.R'
     'modules.R'
     'notifications.R'
@@ -162,8 +170,9 @@ Collate:
     'snapshot.R'
     'tar.R'
     'test-export.R'
-    'timer.R'
+    'test-module.R'
+    'test.R'
     'update-input.R'
-RoxygenNote: 6.1.1
+RoxygenNote: 7.0.2
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
