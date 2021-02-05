@@ -558,6 +558,7 @@ var ShinyApp = function() {
 
       // Dispatch the message to the appropriate input object
       if ($obj.length > 0) {
+        if (!$obj.attr("aria-live")) $obj.attr("aria-live", "polite");
         var el = $obj[0];
         var evt = jQuery.Event('shiny:updateinput');
         evt.message = message[i].message;
@@ -695,6 +696,12 @@ var ShinyApp = function() {
       // returning true continues removing all remaining elements.
       return message.multiple;
     });
+  });
+
+  addMessageHandler('frozen', function(message) {
+    for (let i = 0; i < message.ids.length; i++) {
+      exports.forgetLastInputValue(message.ids[i]);
+    }
   });
 
   function getTabset(id) {

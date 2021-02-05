@@ -12,24 +12,6 @@ test_that("files are loaded into the right env", {
   expect_equal(get("global", genv, inherits=FALSE), "ABC")
 })
 
-test_that("loadSupport messages to inform about loading", {
-  renv <- new.env(parent=environment())
-  genv <- new.env(parent=environment())
-
-  # Plural
-  expect_message(loadSupport(test_path("../test-helpers/app1-standard"), renv=renv, globalrenv=genv),
-                 "Automatically loading 2 .R files")
-  # Singular
-  expect_message(loadSupport(test_path("../test-helpers/app2-nested"), renv=renv, globalrenv=NULL),
-                 "Automatically loading 1 .R file")
-})
-
-test_that("loadSupport skips if _disable_autoload.R found", {
-  expect_message(loadSupport(test_path("../test-helpers/app6-disabled"), renv=environment(), globalrenv=NULL),
-                 "disable_autoload.R detected; not loading")
-  expect_false(exists("helper1"))
-})
-
 test_that("Can suppress sourcing global.R", {
   # Confirm that things blow up if we source global.R
   expect_error(loadSupport(test_path("../test-helpers/app3-badglobal")))
@@ -72,9 +54,8 @@ test_that("With ui/server.R, global.R is loaded before R/ helpers and into the r
   }
 
   # Temporarily opt-in to R/ file autoloading
-  orig <- getOption("shiny.autoload.r", NULL)
-  options(shiny.autoload.r=TRUE)
-  on.exit({options(shiny.autoload.r=orig)}, add=TRUE)
+  op <- options(shiny.autoload.r=TRUE)
+  on.exit(options(op), add=TRUE)
 
   # + shinyAppDir_serverR
   # +--- sourceUTF8
@@ -89,9 +70,9 @@ test_that("With ui/server.R, global.R is loaded before R/ helpers and into the r
 
   # Should have seen three calls -- first to global then to the helpers
   expect_length(calls, 3)
-  expect_match(calls[[1]][[1]], "/global\\.R$", perl=TRUE)
-  expect_match(calls[[2]][[1]], "/helperCap\\.R$", perl=TRUE)
-  expect_match(calls[[3]][[1]], "/helperLower\\.r$", perl=TRUE)
+  expect_match(calls[[1]][[1]], "global\\.R$", perl=TRUE)
+  expect_match(calls[[2]][[1]], "helperCap\\.R$", perl=TRUE)
+  expect_match(calls[[3]][[1]], "helperLower\\.r$", perl=TRUE)
 
   # Check environments
   # global.R loaded into the global env
@@ -117,7 +98,7 @@ test_that("With ui/server.R, global.R is loaded before R/ helpers and into the r
   sa$httpHandler(list())
   expect_length(calls, 1)
   # ui.R is sourced into a child environment of the helpers
-  expect_match(calls[[1]][[1]], "/ui\\.R$")
+  expect_match(calls[[1]][[1]], "ui\\.R$")
   expect_identical(parent.env(calls[[1]]$envir), helperEnv1)
 })
 
@@ -147,7 +128,7 @@ test_that("Loading supporting R files is opt-out", {
 
   # Should have seen three calls from global.R -- helpers are enabled
   expect_length(calls, 3)
-  expect_match(calls[[1]][[1]], "/global\\.R$", perl=TRUE)
+  expect_match(calls[[1]][[1]], "global\\.R$", perl=TRUE)
 })
 
 
@@ -176,7 +157,7 @@ test_that("Disabling supporting R files works", {
 
   # Should have seen one calls from global.R -- helpers are disabled
   expect_length(calls, 1)
-  expect_match(calls[[1]][[1]], "/global\\.R$", perl=TRUE)
+  expect_match(calls[[1]][[1]], "global\\.R$", perl=TRUE)
 })
 
 test_that("app.R is loaded after R/ helpers and into the right envs", {
@@ -187,7 +168,7 @@ test_that("app.R is loaded after R/ helpers and into the right envs", {
   }
 
   # Temporarily opt-in to R/ file autoloading
-  orig <- getOption("shiny.autoload.r", FALSE)
+  orig <- getOption("shiny.autoload.r", NULL)
   options(shiny.autoload.r=TRUE)
   on.exit({options(shiny.autoload.r=orig)}, add=TRUE)
 
@@ -204,8 +185,8 @@ test_that("app.R is loaded after R/ helpers and into the right envs", {
 
   # Should have seen three calls -- first to two helpers then to app.R
   expect_length(calls, 2)
-  expect_match(calls[[1]][[1]], "/helper\\.R$", perl=TRUE)
-  expect_match(calls[[2]][[1]], "/app\\.R$", perl=TRUE)
+  expect_match(calls[[1]][[1]], "helper\\.R$", perl=TRUE)
+  expect_match(calls[[2]][[1]], "app\\.R$", perl=TRUE)
 
   # Check environments
   # helpers are loaded into a child of the global env
@@ -214,4 +195,70 @@ test_that("app.R is loaded after R/ helpers and into the right envs", {
 
   # app.R is sourced into a child environment of the helpers
   expect_identical(parent.env(calls[[2]]$envir), helperEnv1)
+})
+
+test_that("global.R and sources in R/ are sourced in the app directory", {
+  appDir <- test_path("../test-helpers/app1-standard")
+  appGlobalEnv <- new.env(parent = globalenv())
+  appEnv <- new.env(parent = appGlobalEnv)
+  loadSupport(appDir, renv = appEnv, globalrenv = appGlobalEnv)
+
+  # Set by ../test-helpers/app1-standard/global.R
+  expect_equal(normalizePath(appGlobalEnv$global_wd), normalizePath(appDir))
+
+  # Set by ../test-helpers/app1-standard/R/helperCap.R
+  expect_equal(normalizePath(appEnv$source_wd), normalizePath(appDir))
+})
+
+test_that("Setting options in various places works", {
+  op <- options(shiny.launch.browser = FALSE)
+  on.exit(options(op), add = TRUE)
+
+  appDir <- test_path("../test-helpers/app7-port")
+  withPort <- function(port, expr) {
+    op <- options(app7.port = port)
+    on.exit(options(op), add = TRUE)
+
+    force(expr)
+  }
+
+  expect_port <- function(expr, port) {
+    later::later(~stopApp(), 0)
+    expect_message(expr, paste0("Listening on http://127.0.0.1:", port), fixed = TRUE)
+  }
+
+  expect_port(runApp(appDir), 3030)
+
+  appObj <- source(file.path(appDir, "app.R"))$value
+  expect_port(print(appObj), 3030)
+
+  appObj <- shinyAppDir(appDir)
+  expect_port(print(appObj), 3030)
+
+  # The outermost call (shinyAppDir) has its options take precedence over the
+  # options in the inner call (shinyApp in app7-port/app.R).
+  appObj <- shinyAppDir(appDir, options = list(port = 4040))
+  expect_port(print(appObj), 4040)
+  expect_port(runApp(appObj), 4040)
+
+  # Options set directly on the runApp call take precedence over everything.
+  expect_port(runApp(appObj, port = 5050), 5050)
+
+  # wrapped.R calls shinyAppDir("app.R")
+  expect_port(runApp(file.path(appDir, "wrapped.R")), 3030)
+  # wrapped2.R calls shinyAppFile("wrapped.R", options = list(port = 3032))
+  expect_port(runApp(file.path(appDir, "wrapped2.R")), 3032)
+
+  shiny_port_orig <- getOption("shiny.port")
+  # Calls to options(shiny.port = xxx) within app.R should also work reliably
+  expect_port(runApp(file.path(appDir, "option.R")), 7777)
+  # Ensure that option was unset/restored
+  expect_identical(getOption("shiny.port"), shiny_port_orig)
+  # options(shiny.port = xxx) is overrideable
+  appObj <- shinyAppFile(file.path(appDir, "option.R"), options = list(port = 8888))
+  expect_port(print(appObj), 8888)
+
+  # onStop still works even if app.R has an error (ensure option was unset)
+  expect_error(runApp(file.path(appDir, "option-broken.R")), "^boom$")
+  expect_null(getOption("shiny.port"))
 })

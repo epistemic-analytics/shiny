@@ -26,14 +26,9 @@ test_that("runTests works", {
     NULL
   }
 
-  # Temporarily opt-in to R/ file autoloading
-  orig <- getOption("shiny.autoload.r", NULL)
-  options(shiny.autoload.r=TRUE)
-  on.exit({options(shiny.autoload.r=orig)}, add=TRUE)
-
   runTestsSpy <- rewire(runTests, sourceUTF8 = sourceStub, loadSupport=loadSupportStub)
 
-  res <- runTestsSpy(test_path("../test-helpers/app1-standard"))
+  res <- runTestsSpy(test_path("../test-helpers/app1-standard"), assert = FALSE)
 
   # Should have seen two calls to each test runner
   expect_length(calls, 2)
@@ -52,84 +47,45 @@ test_that("runTests works", {
     file.path(test_path("../test-helpers/app1-standard"), "tests")))
 
   # Check the results
-  expect_equal(res$result, FALSE)
-  expect_length(res$files, 2)
-  expect_equal(res$files[1], list(`runner1.R` = NA_character_))
-  expect_equal(res$files[[2]]$message, "I was told to throw an error")
-  expect_s3_class(res, "shinytestrun")
+  expect_equal(all(res$pass), FALSE)
+  expect_length(res$file, 2)
+  expect_equal(basename(res$file[1]), "runner1.R")
+  expect_equal(res[2,]$result[[1]]$message, "I was told to throw an error")
+  expect_s3_class(res, "shiny_runtests")
 
-  # Check that supporting files were loaded
-  expect_length(loadCalls, 1)
-  # global should be a child of emptyenv
-  ge <- loadCalls[[1]]$globalrenv
-  expect_identical(parent.env(ge), globalenv())
-  # renv should be a child of our globalrenv
-  expect_identical(parent.env(loadCalls[[1]]$renv), ge)
+  # Check that supporting files were NOT loaded using Spy Functions
+  expect_length(loadCalls, 0)
 
   # Clear out err'ing files and rerun
   filesToError <- character(0)
 
-  res <- runTestsSpy(test_path("../test-helpers/app1-standard"))
-  expect_equal(res$result, TRUE)
-  expect_equal(res$files, list(`runner1.R` = NA_character_, `runner2.R` = NA_character_))
-
-  # If autoload is false, it should still load global.R. Because this load happens in the top-level of the function,
-  # our spy will catch it.
   calls <- list()
-
-  # Temporarily opt-out of R/ file autoloading
-  orig <- getOption("shiny.autoload.r", NULL)
-  options(shiny.autoload.r=FALSE)
-  on.exit({options(shiny.autoload.r=orig)}, add=TRUE)
-
   res <- runTestsSpy(test_path("../test-helpers/app1-standard"))
-  expect_length(calls, 3)
-  expect_match(calls[[1]][[1]], "/global\\.R", perl=TRUE)
+  expect_equal(all(res$pass), TRUE)
+  expect_equal(basename(res$file), c("runner1.R", "runner2.R"))
+  expect_length(calls, 2)
+  expect_match(calls[[1]][[1]], "runner1\\.R", perl=TRUE)
+  expect_match(calls[[2]][[1]], "runner2\\.R", perl=TRUE)
+
 })
 
 test_that("calls out to shinytest when appropriate", {
-  isShinyTest <- TRUE
-  isShinyTestStub <- function(...){
-    isShinyTest
+  is_legacy_shinytest_val <- TRUE
+  is_legacy_shinytest_dir_stub <- function(...){
+    is_legacy_shinytest_val
   }
 
-  shinytestInstalled <- FALSE
-  requireNamespaceStub <- function(...){
-    shinytestInstalled
-  }
-
-  # All are shinytests but shinytest isn't installed
-  runTestsSpy <- rewire(runTests,
-                    isShinyTest = isShinyTestStub,
-                    requireNamespace = requireNamespaceStub)
-  expect_error(runTestsSpy(test_path("../test-helpers/app1-standard")), "but shinytest is not installed")
-
-  # All are shinytests and shinytest is installed
-  shinytestInstalled <- TRUE
-  sares <- list()
-  sares[[1]] <- list(name = "test1", pass=TRUE)
-  sares[[2]] <- list(name = "test2", pass=FALSE)
-  overloadShinyTest <- rewire_namespace_handler("shinytest", "testApp",
-                                                function(...){ list(results=sares) })
-  runTestsSpy <- rewire(runTests, isShinyTest = isShinyTestStub, requireNamespace = requireNamespaceStub, `::` = overloadShinyTest)
-
-  # Run shinytest with a failure
-  res2 <- runTestsSpy(test_path("../test-helpers/app1-standard"))
-  expect_false(res2$result)
-  expect_equal(res2$files, list(test1=NA_character_, test2=simpleError("Unknown shinytest error")))
-  expect_s3_class(res2, "shinytestrun")
-
-  # Run shinytest with all passing
-  sares[[2]]$pass <- TRUE
-  res2 <- runTestsSpy(test_path("../test-helpers/app1-standard"))
-  expect_true(res2$result)
-  expect_equal(res2$files, list(test1=NA_character_, test2=NA_character_))
-  expect_s3_class(res2, "shinytestrun")
+  # All are shinytests
+  runTestsSpy <- rewire(runTests, is_legacy_shinytest_dir = is_legacy_shinytest_dir_stub)
+  expect_error(
+    runTestsSpy(test_path("../test-helpers/app1-standard"), assert = FALSE),
+    "not supported"
+  )
 
   # Not shinytests
-  isShinyTest <- FALSE
+  is_legacy_shinytest_val <- FALSE
   res <- runTestsSpy(test_path("../test-helpers/app1-standard"))
-  expect_s3_class(res, "shinytestrun")
+  expect_s3_class(res, "shiny_runtests")
 })
 
 test_that("runTests filters", {
@@ -157,7 +113,105 @@ test_that("runTests filters", {
 test_that("runTests handles the absence of tests", {
   expect_error(runTests(test_path("../test-helpers/app2-nested")), "No tests directory found")
   expect_message(res <- runTests(test_path("../test-helpers/app6-empty-tests")), "No test runners found in")
-  expect_equal(res$result, NA)
-  expect_equal(res$files, list())
-  expect_s3_class(res, "shinytestrun")
+  expect_equal(res$file, character(0))
+  expect_equal(res$pass, logical(0))
+  expect_equivalent(res$result, list())
+  expect_s3_class(res, "shiny_runtests")
+})
+
+test_that("runTests runs as expected without rewiring", {
+  appDir <- file.path("..", "test-helpers", "app1-standard")
+  df <- testthat::expect_output(
+    print(runTests(appDir = appDir, assert = FALSE)),
+    "Shiny App Test Results\\n\\* Success\\n  - app1-standard/tests/runner1\\.R\\n  - app1-standard/tests/runner2\\.R"
+  )
+
+  expect_equivalent(df, data.frame(
+    file = file.path(appDir, "tests", c("runner1.R", "runner2.R")),
+    pass = c(TRUE, TRUE),
+    result = I(list(1, NULL)),
+    stringsAsFactors = FALSE
+  ))
+  expect_s3_class(df, "shiny_runtests")
+})
+
+
+context("shinyAppTemplate + runTests")
+test_that("app template works with runTests", {
+
+  testthat::skip_on_cran()
+  testthat::skip_if_not_installed("shinytest", "1.3.1.9000")
+  testthat::skip_if(!shinytest::dependenciesInstalled(), "shinytest dependencies not installed. Call `shinytest::installDependencies()`")
+
+  # test all combos
+  make_combos <- function(...) {
+    args <- list(...)
+    combo_dt <- do.call(expand.grid, args)
+    lapply(apply(combo_dt, 1, unlist), unname)
+  }
+
+  combos <- unique(unlist(
+    recursive = FALSE,
+    list(
+      "all",
+      # only test cases for shinytest where appropriate, shinytest is "slow"
+      make_combos("app", list(NULL, "module"), "shinytest"),
+      # expand.grid on all combos
+      make_combos("app", list(NULL, "module"), list(NULL, "rdir"), list(NULL, "testthat"))
+    )
+  ))
+
+  for (combo in combos) {local({
+    random_folder <- paste0("shinyAppTemplate-", paste0(combo, collapse = "_"))
+    tempTemplateDir <- file.path(tempdir(), random_folder)
+    shinyAppTemplate(tempTemplateDir, combo)
+    on.exit(unlink(tempTemplateDir, recursive = TRUE), add = TRUE)
+
+    if (any(c("all", "shinytest", "testthat") %in% combo)) {
+
+      # suppress all output messages
+      ignore <- capture.output({
+        # do not let an error here stop this test
+        # string comparisons will be made below
+        test_result <- runTests(tempTemplateDir, assert = FALSE)
+      })
+
+      expected_test_output <- paste0(
+        c(
+          "Shiny App Test Results",
+          "* Success",
+          if (any(c("all", "shinytest") %in% combo))
+            paste0("  - ", file.path(random_folder, "tests", "shinytest.R")),
+          if (any(c("all", "testthat") %in% combo))
+            paste0("  - ", file.path(random_folder, "tests", "testthat.R"))
+        ),
+        collapse = "\n"
+      )
+
+      test_output <- paste0(
+        capture.output({
+          print(test_result)
+        }),
+        collapse = "\n"
+      )
+
+      if (identical(expected_test_output, test_output)) {
+        testthat::succeed()
+      } else {
+        # be very verbose in the error output to help find root cause of failure
+        cat("\nrunTests() output:\n", test_output, "\n\n")
+        cat("Expected print output:\n", expected_test_output, "\n\n")
+        cat("runTests() object:\n")
+        utils::str(test_result)
+        cat("\n")
+        testthat::fail(paste0("runTests() output for '", random_folder, "' failed. Received:\n", test_output, "\n"))
+      }
+
+    } else {
+      expect_error(
+        runTests(tempTemplateDir)
+      )
+    }
+  })}
+
 })

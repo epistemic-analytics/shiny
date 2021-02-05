@@ -26,7 +26,7 @@ frequent search requests).}
 
 \item{callback}{A JavaScript function to be applied to the DataTable object.
 This is useful for DataTables plug-ins, which often require the DataTable
-instance to be available (\url{http://datatables.net/extensions/}).}
+instance to be available (\url{https://datatables.net/extensions/}).}
 
 \item{escape}{Whether to escape HTML entities in the table: \code{TRUE} means
 to escape the whole table, and \code{FALSE} means not to escape it.
@@ -52,7 +52,7 @@ the server infrastructure.
 }
 \details{
 For the \code{options} argument, the character elements that have the class
-\code{"AsIs"} (usually returned from \code{\link[base:I]{base::I()}}) will be evaluated in
+\code{"AsIs"} (usually returned from \code{\link[base:AsIs]{base::I()}}) will be evaluated in
 JavaScript. This is useful when the type of the option value is not supported
 in JSON, e.g., a JavaScript function, which can be obtained by evaluating a
 character string. Note this only applies to the root-level elements of the
@@ -66,7 +66,7 @@ separate package \pkg{DT} (\url{https://github.com/rstudio/DT}) that allows
 you to create both server-side and client-side DataTables, and supports
 additional DataTables features. Consider using \code{DT::renderDataTable()}
 and \code{DT::dataTableOutput()} (see
-\url{http://rstudio.github.io/DT/shiny.html} for more information).
+\url{https://rstudio.github.io/DT/shiny.html} for more information).
 }
 \examples{
 ## Only run this example in interactive R sessions
@@ -92,5 +92,5 @@ if (interactive()) {
 }
 }
 \references{
-\url{http://datatables.net}
+\url{https://datatables.net}
 }

@@ -56,22 +56,25 @@ test_that("reactivePoll supported", {
   expect_equal(i, 2)
 })
 
-test_that("renderCachedPlot supported", {
-  session <- MockShinySession$new()
-  isolate({
-    # renderCachedPlot is sensitive to having the cache set for it before entering.
-    origCache <- getShinyOption("cache")
-    shinyOptions(cache = MemoryCache$new())
-    on.exit(shinyOptions(cache = origCache), add=TRUE)
-
-    p <- renderCachedPlot({ plot(1,1) }, { Sys.time() })
-    plt <- p(session, "name")
-
-    # Should have a size defined
-    expect_equal(plt$coordmap$dims$width, 692) #FIXME: why isn't this respecting the clientdata sizes?
-    expect_equal(plt$coordmap$dims$height, 400)
-  })
-})
+# `renderCachedPlot()` is now implemented with `bindCache()`, and won't work by
+# calling `f(session, "name")`, because the key computation function is not
+# called with session and name.
+# test_that("renderCachedPlot supported", {
+#   session <- MockShinySession$new()
+#   isolate({
+#     # renderCachedPlot is sensitive to having the cache set for it before entering.
+#     origCache <- getShinyOption("cache")
+#     shinyOptions(cache = cachem::cache_mem())
+#     on.exit(shinyOptions(cache = origCache), add=TRUE)
+#
+#     p <- renderCachedPlot({ plot(1,1) }, { Sys.time() })
+#     plt <- p(session, "name")
+#
+#     # Should have a size defined
+#     expect_equal(plt$coordmap$dims$width, 692) #FIXME: why isn't this respecting the clientdata sizes?
+#     expect_equal(plt$coordmap$dims$height, 400)
+#   })
+# })
 
 test_that("renderDataTable supported", {
   session <- MockShinySession$new()
@@ -171,7 +174,6 @@ test_that("session supports allowReconnect", {
 
 test_that("session supports clientData", {
   session <- MockShinySession$new()
-  expect_equal(session$clientData$allowDataUriScheme, TRUE)
   expect_equal(session$clientData$pixelratio, 1)
   expect_equal(session$clientData$url_protocol, "http:")
   expect_equal(session$clientData$url_hostname, "mocksession")
@@ -220,7 +222,14 @@ test_that("session supports userData", {
 
 test_that("session supports resetBrush", {
   session <- MockShinySession$new()
-  expect_warning(session$resetBrush(1), "isn't meaningfully mocked")
+  withr::with_options(list("shiny.mocksession.warn" = TRUE), {
+    expect_warning(session$resetBrush(1))
+  })
+})
+
+test_that("generated methods signal unused argument errors", {
+  expect_error(session$resetBrush(1,2,3))
+  expect_error(session$resetBrush(1,2))
 })
 
 test_that("session supports sendCustomMessage", {
@@ -243,12 +252,16 @@ test_that("session supports sendInputMessage", {
 
 test_that("session supports setBookmarkExclude", {
   session <- MockShinySession$new()
-  expect_warning(session$setBookmarkExclude(names=1), "Bookmarking isn't meaningfully mocked")
+  withr::with_options(list("shiny.mocksession.warn" = TRUE), {
+    expect_warning(session$setBookmarkExclude(names=1))
+  })
 })
 
 test_that("session supports getBookmarkExclude", {
   session <- MockShinySession$new()
-  expect_warning(session$getBookmarkExclude(), "Bookmarking isn't meaningfully mocked")
+  withr::with_options(list("shiny.mocksession.warn" = TRUE), {
+    expect_warning(session$getBookmarkExclude())
+  })
 })
 
 test_that("session supports onBookmark", {
@@ -265,7 +278,9 @@ test_that("session supports onBookmarked", {
 
 test_that("session supports doBookmark", {
   session <- MockShinySession$new()
-  expect_warning(session$doBookmark(), "Bookmarking isn't meaningfully mocked")
+  withr::with_options(list("shiny.mocksession.warn" = TRUE), {
+    expect_warning(session$doBookmark())
+  })
 })
 
 test_that("session supports onRestore", {
